@@ -1,0 +1,19 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+env/
+.conda/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+
+# OS/editor noise
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,11 @@
+{
+  "model_name": "CNN",
+  "input_shape": [
+    28,
+    28,
+    1
+  ],
+  "pixel_range": "0 to 1",
+  "trained_on": "MNIST",
+  "prediction_script": "test.py"
+}

@@ -1,0 +1,8 @@
+{
+  "model_accuracy": {
+    "MLP": 0.9792,
+    "CNN": 0.9938
+  },
+  "best_model": "CNN",
+  "test_set_size": 10000
+}
