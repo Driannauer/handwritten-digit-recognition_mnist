@@ -34,18 +34,7 @@ PROJECT_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = PROJECT_DIR / "outputs"
 MODEL_DIR = PROJECT_DIR / "models"
 DEFAULT_MODEL_PATH = MODEL_DIR / "best_digit_model.keras"
-KNOWN_EXPECTED_DEFAULTS = {
-    "t1.jpg": 6,
-    "t2.jpg": 1,
-    "t3.jpg": 8,
-    "t4.jpg": 9,
-    "t5.jpg": 7,
-    "t6.jpg": 2,
-    "t7.jpg": 0,
-    "t8.jpg": 5,
-    "t9.jpg": 3,
-    "t10.jpg": 4,
-}
+DEFAULT_EXPECTED_LABELS_PATH = PROJECT_DIR / "expected_labels.json"
 
 
 @dataclass
@@ -94,12 +83,16 @@ def discover_default_images() -> list[str]:
     return [path.name for path in unique_paths]
 
 
-def default_expected_items() -> list[str]:
-    items = []
-    for file_name, label_value in KNOWN_EXPECTED_DEFAULTS.items():
-        if (PROJECT_DIR / file_name).exists():
-            items.append(f"{file_name}={label_value}")
-    return items
+def parse_digit_label(label_value: object, context: str) -> int | None:
+    try:
+        parsed_label = int(str(label_value).strip())
+    except (TypeError, ValueError):
+        print(f"Ignore invalid expected label {context}: {label_value}")
+        return None
+    if 0 <= parsed_label <= 9:
+        return parsed_label
+    print(f"Ignore out-of-range expected label {context}: {label_value}")
+    return None
 
 
 def parse_expected_labels(items: list[str]) -> dict[str, int]:
@@ -107,17 +100,71 @@ def parse_expected_labels(items: list[str]) -> dict[str, int]:
     for item in items:
         if "=" not in item:
             continue
-        name, label_text = item.split("=", 1)
-        try:
-            label_value = int(label_text.strip())
-        except ValueError:
-            print(f"Ignore invalid expected label setting: {item}")
+        name_text, label_text = item.split("=", 1)
+        name = name_text.strip()
+        if not name:
+            print(f"Ignore expected label with empty file name: {item}")
             continue
-        if 0 <= label_value <= 9:
-            expected[name.strip()] = label_value
-        else:
-            print(f"Ignore out-of-range expected label setting: {item}")
+        label_value = parse_digit_label(label_text, f"setting {item}")
+        if label_value is not None:
+            expected[name] = label_value
     return expected
+
+
+def normalize_expected_label_mapping(raw_labels: object) -> dict[str, int]:
+    if not isinstance(raw_labels, dict):
+        print("Ignore expected-label file: top-level JSON value must be an object.")
+        return {}
+
+    labels = raw_labels.get("labels", raw_labels)
+    if not isinstance(labels, dict):
+        print("Ignore expected-label file: labels must be an object.")
+        return {}
+
+    expected: dict[str, int] = {}
+    for name, label_value in labels.items():
+        name_text = str(name).strip()
+        if not name_text:
+            print(f"Ignore expected label with empty file name: {name}")
+            continue
+        parsed_label = parse_digit_label(label_value, f"for {name_text}")
+        if parsed_label is not None:
+            expected[name_text] = parsed_label
+    return expected
+
+
+def load_expected_labels_file(labels_path: str) -> dict[str, int]:
+    if labels_path.strip().lower() in {"", "none", "off"}:
+        return {}
+
+    path = Path(labels_path)
+    if not path.is_absolute():
+        path = PROJECT_DIR / path
+    if not path.exists():
+        print(f"Expected-label file not found, skipped: {labels_path}")
+        return {}
+
+    try:
+        raw_labels = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        print(f"Expected-label file is invalid JSON, skipped: {path}: {exc}")
+        return {}
+    return normalize_expected_label_mapping(raw_labels)
+
+
+def expected_label_for(image_path: Path, expected_labels: dict[str, int]) -> int | None:
+    lookup_keys = [image_path.name]
+    try:
+        relative_key = image_path.resolve().relative_to(PROJECT_DIR).as_posix()
+    except ValueError:
+        relative_key = None
+    if relative_key is not None:
+        lookup_keys.insert(0, relative_key)
+
+    for key in lookup_keys:
+        if key in expected_labels:
+            return expected_labels[key]
+    return None
 
 
 def resolve_image_paths(image_names: list[str]) -> list[Path]:
@@ -242,10 +289,6 @@ def digit_shape_features(processed: np.ndarray) -> dict[str, int]:
     }
 
 
-def looks_like_top_bar_seven(processed: np.ndarray) -> bool:
-    return looks_like_top_bar_seven_features(digit_shape_features(processed))
-
-
 def looks_like_top_bar_seven_features(features: dict[str, int]) -> bool:
     return (
         features["width"] >= 8
@@ -265,6 +308,47 @@ def enhance_top_bar_seven(processed: np.ndarray) -> tuple[np.ndarray, str | None
     top = features["top_row"]
     enhanced[top : top + 4] = np.clip(enhanced[top : top + 4] * 1.8, 0, 1)
     return recenter_processed_digit(enhanced), "top_bar_boost"
+
+
+def append_preprocessing_adjustment(
+    current_adjustment: str | None,
+    new_adjustment: str,
+) -> str:
+    if not current_adjustment:
+        return new_adjustment
+    if new_adjustment in current_adjustment.split("+"):
+        return current_adjustment
+    return f"{current_adjustment}+{new_adjustment}"
+
+
+def build_adjusted_candidate(
+    candidate: PreprocessCandidate,
+    processed: np.ndarray,
+    adjustment: str,
+) -> PreprocessCandidate:
+    return PreprocessCandidate(
+        processed=processed,
+        rotation_degrees=candidate.rotation_degrees,
+        orientation_score=candidate.orientation_score,
+        threshold=candidate.threshold,
+        quality_score=score_processed_digit_quality(processed),
+        preprocessing_adjustment=append_preprocessing_adjustment(
+            candidate.preprocessing_adjustment,
+            adjustment,
+        ),
+    )
+
+
+def build_top_bar_boost_candidate(
+    candidate: PreprocessCandidate,
+) -> PreprocessCandidate | None:
+    if candidate_is_blank(candidate):
+        return None
+
+    enhanced, adjustment = enhance_top_bar_seven(candidate.processed)
+    if adjustment is None:
+        return None
+    return build_adjusted_candidate(candidate, enhanced, adjustment)
 
 
 def preprocess_digit_array(
@@ -375,14 +459,12 @@ def preprocess_digit_array(
     arr = np.array(image).astype(np.float32) / 255.0
 
     processed = recenter_processed_digit(arr)
-    processed, preprocessing_adjustment = enhance_top_bar_seven(processed)
     return PreprocessCandidate(
         processed=processed,
         rotation_degrees=rotation_degrees,
         orientation_score=float(best_score or 0.0),
         threshold=threshold,
         quality_score=score_processed_digit_quality(processed),
-        preprocessing_adjustment=preprocessing_adjustment,
     )
 
 
@@ -396,14 +478,16 @@ def preprocess_user_digit_candidates(
     for rotation_degrees in (0, 90, 270, 180):
         oriented = base_image.rotate(rotation_degrees, expand=True)
         rgb = np.array(oriented).astype(np.float32)
-        candidates.append(
-            preprocess_digit_array(
-                rgb,
-                rotation_degrees=rotation_degrees,
-                sigma=sigma,
-                threshold=threshold,
-            )
+        candidate = preprocess_digit_array(
+            rgb,
+            rotation_degrees=rotation_degrees,
+            sigma=sigma,
+            threshold=threshold,
         )
+        candidates.append(candidate)
+        boosted_candidate = build_top_bar_boost_candidate(candidate)
+        if boosted_candidate is not None:
+            candidates.append(boosted_candidate)
     return candidates
 
 
@@ -411,17 +495,6 @@ def predict_probabilities(model: keras.Model, processed: np.ndarray) -> np.ndarr
     if len(model.input_shape) == 4:
         return model.predict(processed[None, ..., None], verbose=0)[0]
     return model.predict(processed[None], verbose=0)[0]
-
-
-def append_preprocessing_adjustment(
-    current_adjustment: str | None,
-    new_adjustment: str,
-) -> str:
-    if not current_adjustment:
-        return new_adjustment
-    if new_adjustment in current_adjustment.split("+"):
-        return current_adjustment
-    return f"{current_adjustment}+{new_adjustment}"
 
 
 def predict_probabilities_batch(
@@ -432,6 +505,15 @@ def predict_probabilities_batch(
     if len(model.input_shape) == 4:
         return model.predict(batch[..., None], verbose=0)
     return model.predict(batch, verbose=0)
+
+
+def prediction_label_and_confidence(probabilities: np.ndarray) -> tuple[int, float]:
+    predicted_label = int(np.argmax(probabilities))
+    return predicted_label, float(probabilities[predicted_label])
+
+
+def candidate_model_score(confidence: float, quality_score: float) -> float:
+    return confidence * (0.70 + 0.30 * quality_score)
 
 
 def choose_candidate_for_model(
@@ -464,19 +546,37 @@ def choose_candidate_for_model(
     )
     original_candidate = usable_candidates[original_index]
     original_probabilities = probability_rows[original_index]
-    original_confidence = float(np.max(original_probabilities))
+    _, original_confidence = prediction_label_and_confidence(original_probabilities)
     if (
         original_confidence >= 0.85
         and original_candidate.orientation_score >= 0.7 * max_orientation_score
         and original_candidate.quality_score >= 0.45
     ):
+        best_adjusted_candidate = original_candidate
+        best_adjusted_confidence = original_confidence
+        for candidate, probabilities in zip(usable_candidates, probability_rows):
+            if (
+                candidate.rotation_degrees != original_candidate.rotation_degrees
+                or candidate.threshold != original_candidate.threshold
+                or not candidate.preprocessing_adjustment
+            ):
+                continue
+            _, adjusted_confidence = prediction_label_and_confidence(probabilities)
+            if (
+                candidate.quality_score >= 0.80 * original_candidate.quality_score
+                and adjusted_confidence >= best_adjusted_confidence + 0.08
+            ):
+                best_adjusted_candidate = candidate
+                best_adjusted_confidence = adjusted_confidence
+        if best_adjusted_candidate is not original_candidate:
+            return best_adjusted_candidate
         return original_candidate
 
     best_candidate = usable_candidates[0]
     best_score = -1.0
     best_confidence = 0.0
     for candidate, probabilities in zip(usable_candidates, probability_rows):
-        confidence = float(np.max(probabilities))
+        _, confidence = prediction_label_and_confidence(probabilities)
         orientation_weight = candidate.orientation_score / max_orientation_score
         combined_score = confidence * (
             0.35 + 0.30 * orientation_weight + 0.35 * candidate.quality_score
@@ -503,29 +603,70 @@ def refine_low_confidence_candidate(
     candidate: PreprocessCandidate,
 ) -> PreprocessCandidate:
     probabilities = predict_probabilities(model, candidate.processed)
-    predicted_label = int(np.argmax(probabilities))
-    confidence = float(probabilities[predicted_label])
+    predicted_label, confidence = prediction_label_and_confidence(probabilities)
     if confidence >= 0.60:
         return candidate
 
     base_image = open_exif_corrected_image(image_path, "RGB")
     oriented = base_image.rotate(candidate.rotation_degrees, expand=True)
-    refined = preprocess_digit_array(
+    refined_base = preprocess_digit_array(
         np.array(oriented).astype(np.float32),
         rotation_degrees=candidate.rotation_degrees,
         sigma=30,
         threshold=candidate.threshold,
     )
-    refined_probabilities = predict_probabilities(model, refined.processed)
-    refined_label = int(np.argmax(refined_probabilities))
-    refined_confidence = float(refined_probabilities[refined_label])
+    if candidate_is_blank(refined_base):
+        return candidate
 
-    if refined_label == predicted_label and refined_confidence >= confidence + 0.20:
-        refined.preprocessing_adjustment = append_preprocessing_adjustment(
-            refined.preprocessing_adjustment,
+    refined_candidates = [
+        build_adjusted_candidate(
+            refined_base,
+            refined_base.processed,
             "soft_background",
         )
-        return refined
+    ]
+    boosted_refined = build_top_bar_boost_candidate(refined_candidates[0])
+    if boosted_refined is not None:
+        refined_candidates.append(boosted_refined)
+
+    refined_probabilities = predict_probabilities_batch(
+        model,
+        [item.processed for item in refined_candidates],
+    )
+    best_refined = refined_candidates[0]
+    best_refined_label = predicted_label
+    best_refined_confidence = -1.0
+    best_refined_score = -1.0
+    for refined, refined_probability_row in zip(refined_candidates, refined_probabilities):
+        refined_label, refined_confidence = prediction_label_and_confidence(
+            refined_probability_row
+        )
+        refined_score = candidate_model_score(
+            refined_confidence,
+            refined.quality_score,
+        )
+        if refined_score > best_refined_score:
+            best_refined = refined
+            best_refined_label = refined_label
+            best_refined_confidence = refined_confidence
+            best_refined_score = refined_score
+
+    quality_floor = max(0.25, 0.75 * candidate.quality_score)
+    if best_refined.quality_score < quality_floor:
+        return candidate
+
+    original_score = candidate_model_score(confidence, candidate.quality_score)
+    if best_refined_label == predicted_label:
+        if (
+            best_refined_confidence >= confidence + 0.12
+            or best_refined_score >= original_score + 0.08
+        ):
+            return best_refined
+    elif (
+        best_refined_confidence >= max(0.55, confidence + 0.12)
+        and best_refined_score >= original_score + 0.08
+    ):
+        return best_refined
 
     return candidate
 
@@ -550,8 +691,7 @@ def save_prediction_figure(
     preprocessing_adjustment: str | None = None,
 ) -> dict[str, object]:
     probabilities = predict_probabilities(model, processed)
-    predicted_label = int(np.argmax(probabilities))
-    confidence = float(probabilities[predicted_label])
+    predicted_label, confidence = prediction_label_and_confidence(probabilities)
 
     fig, axes = plt.subplots(1, 3, figsize=(12, 4))
 
@@ -691,8 +831,13 @@ def main() -> None:
     parser.add_argument(
         "--expected",
         nargs="*",
-        default=default_expected_items(),
-        help="Optional expected labels, for example: t1.jpg=6 t2.jpg=1",
+        default=[],
+        help="Optional expected labels. These override --expected-labels entries, for example: t1.jpg=6 t2.jpg=1",
+    )
+    parser.add_argument(
+        "--expected-labels",
+        default=str(DEFAULT_EXPECTED_LABELS_PATH),
+        help="JSON file with expected labels. Use 'none' to disable manifest labels.",
     )
     parser.add_argument(
         "--model-path",
@@ -710,7 +855,8 @@ def main() -> None:
             f"Saved model not found: {model_path}. Run python train.py once first."
         )
 
-    expected_labels = parse_expected_labels(args.expected)
+    expected_labels = load_expected_labels_file(args.expected_labels)
+    expected_labels.update(parse_expected_labels(args.expected))
     image_paths = resolve_image_paths(args.images)
     model = keras.models.load_model(model_path)
 
@@ -725,7 +871,7 @@ def main() -> None:
             model,
             image_path,
             processed,
-            expected_labels.get(image_path.name),
+            expected_label_for(image_path, expected_labels),
             8,
             candidate.rotation_degrees,
             candidate.threshold,

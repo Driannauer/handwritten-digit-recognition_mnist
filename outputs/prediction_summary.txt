@@ -7,8 +7,8 @@ Local handwritten image predictions:
 - t1.jpg: predicted 6, expected 6, confidence 100.00%, auto-rotation none, threshold 30
 - t2.jpg: predicted 1, expected 1, confidence 100.00%, auto-rotation 90 degrees, threshold 30
 - t3.jpg: predicted 8, expected 8, confidence 99.94%, auto-rotation none, threshold 30
-- t4.jpg: predicted 9, expected 9, confidence 99.92%, auto-rotation none, threshold 30, preprocess top_bar_boost
-- t5.jpg: predicted 7, expected 7, confidence 100.00%, auto-rotation none, threshold 30, preprocess top_bar_boost
+- t4.jpg: predicted 9, expected 9, confidence 99.94%, auto-rotation none, threshold 30
+- t5.jpg: predicted 7, expected 7, confidence 98.05%, auto-rotation none, threshold 30
 - t6.jpg: predicted 2, expected 2, confidence 99.44%, auto-rotation none, threshold 30
 - t7.jpg: predicted 0, expected 0, confidence 100.00%, auto-rotation none, threshold 30
 - t8.jpg: predicted 5, expected 5, confidence 99.94%, auto-rotation none, threshold 30
