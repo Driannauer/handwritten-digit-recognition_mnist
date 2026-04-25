@@ -1,240 +1,231 @@
 # 手写数字识别本地项目
 
-这是一个可以在本地运行的手写数字识别项目，使用 **TensorFlow/Keras + MNIST** 训练模型，然后用你自己的手写数字图片进行预测。
+这是一个使用 **TensorFlow/Keras + MNIST** 的本地手写数字识别项目。
 
-当前版本已经把功能拆清楚了：
+项目分成两个主要脚本：
 
-1. `train.py` 只负责训练模型。
-2. `test.py` 只负责加载已保存的模型并预测本地图片。
+- `train.py`：训练并评估模型，保存最佳模型。
+- `test.py`：加载已保存模型，预测本地手写数字图片。
 
-也就是说，`train.py` 不再读取 `t1.jpg` 到 `t11.jpg`，也不再生成本地图片预测图。  
-如果只想测试新手写图片，直接运行 `test.py`，不需要重新训练。
+如果只是测试自己的手写图片，通常只需要运行 `test.py`，不需要重新训练。
 
-## 1. 文件说明
+## 文件结构
 
-`train.py`
-
-训练主程序。它会训练 `MLP` 和 `CNN` 两个模型，比较它们在 MNIST 测试集上的准确率，保存表现最好的模型。
-
-`test.py`
-
-预测程序。它会加载 `models/best_digit_model.keras`，然后预测本地手写图片，例如 `t1.jpg` 到 `t11.jpg`。
-
-`environment.yml`
-
-Anaconda 环境配置文件，推荐用它创建环境。
-
-`requirements.txt`
-
-pip 依赖列表，作为备用安装方式。
-
-`models/`
-
-保存训练好的模型。
-
-`outputs/`
-
-保存运行结果图片和文字报告。
-
-`t1.jpg` 到 `t11.jpg`
-
-你自己的手写数字测试图片。它们只用于 `test.py` 预测，不参与训练。
-
-## 2. 使用 Anaconda 运行
-
-打开 Anaconda Prompt 或 PowerShell，进入项目文件夹：
-
-```powershell
-cd 你的项目路径
+```text
+train.py                 训练 MLP/CNN 模型并保存最佳模型
+test.py                  加载模型并预测本地图片
+environment.yml          Conda 环境配置
+requirements.txt         pip 依赖列表
+models/                  保存训练好的模型
+outputs/                 保存训练和预测输出
+t*.jpg                   本地手写数字测试图片
 ```
 
-例如项目放在桌面的 `mnist` 文件夹，可以写成：
+## 环境配置
 
-```powershell
-cd C:\Users\你的用户名\Desktop\mnist
-```
-
-如果你把项目文件夹改名或移动了，就把上面这行换成新的项目路径即可。代码本身会自动根据 `train.py` 和 `test.py` 所在位置寻找 `models`、`outputs` 和 `t1.jpg` 到 `t11.jpg`。
-
-如果是第一次运行，创建环境：
+推荐使用 Conda：
 
 ```powershell
 conda env create -f environment.yml
+conda activate mnist-ml
 ```
 
-如果环境已经存在，可以更新环境：
+如果环境已经存在，可以更新：
 
 ```powershell
 conda env update -f environment.yml --prune
 ```
 
-激活环境：
+备用 pip 安装：
 
 ```powershell
-conda activate mnist-ml
+pip install -r requirements.txt
 ```
 
-## 3. 训练模型
+## train.py 大致内容
 
-运行：
+`train.py` 只负责训练和评估，不读取 `t*.jpg` 本地手写图片。
+
+主要流程：
+
+1. 设置随机种子和输出目录。
+2. 加载 MNIST 数据集，并划分训练集、验证集、测试集。
+3. 保存 MNIST 示例图到 `outputs/01_dataset_examples.png`。
+4. 构建并训练 MLP 模型。
+5. 构建并训练 CNN 模型。
+6. 在 MNIST 测试集上评估两个模型。
+7. 保存训练曲线、模型对比图、混淆矩阵、错误样本和文本报告。
+8. 选择测试准确率更高的模型，保存到 `models/best_digit_model.keras`。
+
+主要模块：
+
+- `load_mnist_data()`：加载并归一化 MNIST 数据。
+- `build_mlp()`：定义全连接神经网络。
+- `build_cnn()`：定义带数据增强的 CNN。
+- `fit_with_history()`：训练模型并记录 loss、accuracy、learning rate。
+- `evaluate_model()`：在测试集上计算准确率和预测结果。
+- `save_training_curves()`：保存训练曲线。
+- `save_confusion_matrix()`：保存混淆矩阵。
+- `save_wrong_samples()`：保存错误样本图。
+- `save_model()`：保存最佳模型和模型信息。
+
+可选参数：
+
+```powershell
+python train.py --train-limit 10000
+```
+
+`--train-limit` 用于限制训练样本数量，默认 `0` 表示使用全部训练样本。
+
+## test.py 大致内容
+
+`test.py` 只负责预测本地图片，不重新训练模型。
+
+主要流程：
+
+1. 加载 `models/best_digit_model.keras`。
+2. 默认查找项目目录中的所有 `t*.jpg`、`t*.jpeg`、`t*.png`、`t*.bmp`。
+3. 读取图片，并根据 EXIF 信息自动转正。
+4. 尝试 `0`、`90`、`270`、`180` 四种旋转方向。
+5. 从照片中提取深色笔迹，裁剪主要数字区域。
+6. 将数字缩放、居中成 MNIST 风格的 `28x28` 输入。
+7. 过滤空白或质量太差的候选图。
+8. 让模型批量预测候选图，并选择最可信的方向。
+9. 低置信度时使用 `soft_background` 做一次更柔和的背景预处理。
+10. 对有明显顶部横画的数字使用 `top_bar_boost`，帮助模型直接识别细长的 7。
+11. 保存预处理图、预测图、txt 报告和 json 报告。
+
+主要模块：
+
+- `discover_default_images()`：发现默认本地图片。
+- `parse_expected_labels()`：解析真实标签。
+- `preprocess_digit_array()`：把照片区域转成 `28x28` 数字图。
+- `score_processed_digit_quality()`：评估候选图质量。
+- `enhance_top_bar_seven()`：对明显顶部横画进行 `top_bar_boost` 预处理。
+- `choose_candidate_for_model()`：在多个旋转候选中选择最终候选。
+- `refine_low_confidence_candidate()`：低置信度时尝试 `soft_background` 二次预处理。
+- `save_prediction_figure()`：保存原图、预处理图和概率柱状图。
+- `save_prediction_reports()`：保存预测摘要。
+
+可选参数：
+
+```powershell
+python test.py --images my_digit.jpg
+python test.py --images my3.jpg my7.jpg --expected my3.jpg=3 my7.jpg=7
+python test.py --model-path models/best_digit_model.keras
+```
+
+## 常用命令
+
+训练模型：
 
 ```powershell
 python train.py
 ```
 
-这一步会重新训练模型，所以耗时比较久。
-
-`train.py` 会做这些事：
-
-1. 加载 MNIST 数据集。
-2. 训练 `MLP` 模型。
-3. 训练 `CNN` 模型。
-4. 在 MNIST 测试集上评估两个模型。
-5. 保存 loss、accuracy、learning rate 曲线。
-6. 保存模型对比图、混淆矩阵、错误样本图。
-7. 保存最佳模型到 `models/best_digit_model.keras`。
-
-注意：`train.py` 里仍然会有 `model.predict(...)` 这类代码，这是为了在 MNIST 测试集上计算准确率、混淆矩阵和错误样本，不是用来预测你的本地手写图片。
-
-## 4. 预测本地手写图片
-
-如果已经训练过模型，直接运行：
+预测默认图片：
 
 ```powershell
 python test.py
 ```
 
-这一步不会重新训练。它只会加载：
-
-```text
-models/best_digit_model.keras
-```
-
-然后默认预测项目文件夹里的所有 `t*.jpg`、`t*.png`、`t*.bmp` 图片。  
-例如当前会预测 `t1.jpg` 到 `t11.jpg`。
-
-如果要预测新图片，例如 `my9.jpg`：
+预测指定图片并提供真实标签：
 
 ```powershell
-python test.py --images my9.jpg --expected my9.jpg=9
+python test.py --images t9.jpg --expected t9.jpg=3
 ```
 
-如果要预测多张图片：
-
-```powershell
-python test.py --images my3.jpg my7.jpg --expected my3.jpg=3 my7.jpg=7
-```
-
-如果不知道真实数字，也可以不写 `--expected`：
+预测指定图片但不提供真实标签：
 
 ```powershell
 python test.py --images my_digit.jpg
 ```
 
-## 5. 当前默认手写图片标签
+## 默认标签
 
-`test.py` 默认知道这些图片的真实标签，方便统计本地测试准确率：
+`test.py` 内置了一组本地测试图片标签，用于计算已知标签准确率。只有文件真实存在时才会参与统计。
 
 ```text
-t1.jpg=3
-t2.jpg=5
-t3.jpg=4
-t4.jpg=7
-t5.jpg=9
+t1.jpg=6
+t2.jpg=1
+t3.jpg=8
+t4.jpg=9
+t5.jpg=7
 t6.jpg=2
-t7.jpg=8
-t8.jpg=9
+t7.jpg=0
+t8.jpg=5
 t9.jpg=3
-t10.jpg=6
-t11.jpg=4
+t10.jpg=4
 ```
 
-如果新增了 `t12.jpg` 这类图片，但没有在命令里写 `--expected t12.jpg=真实数字`，报告里会显示 `expected unknown`。
+新增图片时，可以在命令中显式写真实标签：
 
-## 6. test.py 如何预处理图片
+```powershell
+python test.py --images new_digit.jpg --expected new_digit.jpg=7
+```
 
-`test.py` 不是直接把照片丢给模型，而是先把照片处理成接近 MNIST 的 28x28 小图：
+不写 `--expected` 时，报告中会显示 `expected unknown`。
 
-1. 读取图片，并根据照片自带的 EXIF 方向信息自动转正。
-2. 分别尝试 `0`、`90`、`270`、`180` 四种旋转方向，避免横版照片被横着识别。
-3. 从照片里提取深色笔迹，尽量压掉纸张背景和横线。
-4. 找到最像数字主体的连通区域，把无关背景裁掉。
-5. 把数字放到正方形画布中，缩放成 `28x28`。
-6. 根据数字重心把笔迹移动到中间。
-7. 让模型分别看几个旋转候选图，选择更可信的方向作为最终预测结果。
+## 输出文件
 
-简单理解：这一步就是把手机拍的真实照片，尽量变成 MNIST 那种“居中、清晰、28x28”的数字小图。
+训练输出：
 
-## 7. 输出文件说明
+```text
+outputs/01_dataset_examples.png
+outputs/02_mlp_training_curves.png
+outputs/03_cnn_training_curves.png
+outputs/04_model_comparison.png
+outputs/05_confusion_matrix.png
+outputs/06_wrong_samples.png
+outputs/results_summary.txt
+outputs/results_summary.json
+outputs/classification_report.txt
+outputs/training_history.json
+models/best_digit_model.keras
+models/best_digit_model_info.json
+```
 
-训练时由 `train.py` 生成：
+预测输出：
 
-`outputs/01_dataset_examples.png`
+```text
+outputs/07_xxx_preprocessed_28x28.png
+outputs/08_xxx_prediction.png
+outputs/prediction_summary.txt
+outputs/prediction_summary.json
+```
 
-MNIST 数据集示例图。
+## 预处理说明
 
-`outputs/02_mlp_training_curves.png`
+真实手机照片和 MNIST 差异很大，所以 `test.py` 会先把图片尽量变成 MNIST 风格：
 
-MLP 的训练曲线，包含 train/val loss、train/val accuracy 和 learning rate。
+- 深色笔迹变成亮色数字。
+- 背景、阴影和纸张纹理尽量压低。
+- 裁剪出主要数字区域。
+- 缩放到 `28x28`。
+- 根据重心居中。
+- 自动比较多个旋转方向。
 
-`outputs/03_cnn_training_curves.png`
+当前还有两个针对真实照片的增强：
 
-CNN 的训练曲线，包含 train/val loss、train/val accuracy 和 learning rate。
+- `top_bar_boost`：增强顶部横画，让细长的 7 更容易被模型直接识别。
+- `soft_background`：当模型低置信时，用更柔和的背景估计重新提取笔迹，提升某些数字如 3 的稳定性。
 
-`outputs/04_model_comparison.png`
+这些增强属于预测阶段的预处理，不会修改训练好的模型权重。
 
-MLP 和 CNN 的测试集准确率对比图。
+## 常见问题
 
-`outputs/05_confusion_matrix.png`
+为什么 `test.py` 不需要重新训练？
 
-最佳模型在 MNIST 测试集上的混淆矩阵。
+因为训练好的最佳模型保存在 `models/best_digit_model.keras`，`test.py` 会直接加载它。
 
-`outputs/06_wrong_samples.png`
+为什么 `train.py` 中也有 `predict`？
 
-最佳模型在 MNIST 测试集中识别错误的样本。
+训练结束后需要在 MNIST 测试集上预测，才能计算准确率、混淆矩阵和错误样本。这和本地图片预测不是一回事。
 
-`outputs/results_summary.txt`
+为什么本地图片有时置信度低？
 
-训练结果文字总结。
+模型只在 MNIST 上训练，而本地照片包含拍照角度、阴影、纸张纹理、笔画粗细和个人书写风格差异。预处理可以缓解，但如果想更稳，最好收集自己的手写样本并加入训练或微调。
 
-`outputs/classification_report.txt`
+如果提示 `conda` 不是命令怎么办？
 
-分类报告。
-
-`outputs/training_history.json`
-
-每一轮训练的原始指标数据。
-
-预测时由 `test.py` 生成：
-
-`outputs/07_xxx_preprocessed_28x28.png`
-
-本地手写图片预处理后的 28x28 图。
-
-`outputs/08_xxx_prediction.png`
-
-本地手写图片预测结果图，包含原图、预处理图和 0 到 9 的概率柱状图。
-
-`outputs/prediction_summary.txt`
-
-本地图片预测结果文字总结。
-
-`outputs/prediction_summary.json`
-
-本地图片预测结果原始数据。
-
-## 8. 常见问题
-
-为什么运行 `test.py` 不需要重新训练？
-
-因为最佳模型已经保存在 `models/best_digit_model.keras`。`test.py` 会直接加载这个文件做预测。
-
-为什么 `train.py` 里还有预测相关单词？
-
-训练完成后，需要让模型在 MNIST 测试集上输出预测结果，才能计算准确率、混淆矩阵和错误样本。所以 `train.py` 里的预测只服务于训练评估，不负责本地图片预测。
-
-为什么本地手写图片预测放在 `test.py`？
-
-这样更清楚：训练和预测互不干扰。以后你新增图片，只运行 `python test.py` 就可以。
-
-如果提示 `conda` 不是命令，说明当前终端没有加载 Anaconda。建议打开 Anaconda Prompt 再运行。
+说明当前终端没有加载 Conda。建议打开 Anaconda Prompt，或确认 Anaconda 已加入系统 PATH。

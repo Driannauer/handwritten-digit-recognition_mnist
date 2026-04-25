@@ -4,16 +4,15 @@ Handwritten Digit Recognition - Prediction Summary
 Loaded model: models\best_digit_model.keras
 
 Local handwritten image predictions:
-- t1.jpg: predicted 3, expected 3, confidence 99.74%, auto-rotation none
-- t2.jpg: predicted 5, expected 5, confidence 99.24%, auto-rotation none
-- t3.jpg: predicted 4, expected 4, confidence 99.89%, auto-rotation none
-- t4.jpg: predicted 7, expected 7, confidence 99.88%, auto-rotation none
-- t5.jpg: predicted 9, expected 9, confidence 96.04%, auto-rotation none
-- t6.jpg: predicted 2, expected 2, confidence 99.52%, auto-rotation none
-- t7.jpg: predicted 8, expected 8, confidence 99.97%, auto-rotation none
-- t8.jpg: predicted 9, expected 9, confidence 98.76%, auto-rotation none
-- t9.jpg: predicted 3, expected 3, confidence 98.05%, auto-rotation 90 degrees
-- t10.jpg: predicted 6, expected 6, confidence 100.00%, auto-rotation 90 degrees
-- t11.jpg: predicted 4, expected 4, confidence 99.98%, auto-rotation none
+- t1.jpg: predicted 6, expected 6, confidence 100.00%, auto-rotation none, threshold 30
+- t2.jpg: predicted 1, expected 1, confidence 100.00%, auto-rotation 90 degrees, threshold 30
+- t3.jpg: predicted 8, expected 8, confidence 99.94%, auto-rotation none, threshold 30
+- t4.jpg: predicted 9, expected 9, confidence 99.92%, auto-rotation none, threshold 30, preprocess top_bar_boost
+- t5.jpg: predicted 7, expected 7, confidence 100.00%, auto-rotation none, threshold 30, preprocess top_bar_boost
+- t6.jpg: predicted 2, expected 2, confidence 99.44%, auto-rotation none, threshold 30
+- t7.jpg: predicted 0, expected 0, confidence 100.00%, auto-rotation none, threshold 30
+- t8.jpg: predicted 5, expected 5, confidence 99.94%, auto-rotation none, threshold 30
+- t9.jpg: predicted 3, expected 3, confidence 99.91%, auto-rotation none, threshold 30
+- t10.jpg: predicted 4, expected 4, confidence 99.89%, auto-rotation none, threshold 30
 
-Known-label local accuracy: 11/11
+Known-label local accuracy: 10/10

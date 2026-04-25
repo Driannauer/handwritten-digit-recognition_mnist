@@ -701,16 +701,12 @@ def main() -> None:
     for file_index, result in enumerate(results, start=2):
         save_training_curves(result, file_index)
 
-    comparison_index = 4
-    confusion_index = 5
-    wrong_index = 6
-
     save_training_history_json(results)
-    save_model_comparison(results, comparison_index)
+    save_model_comparison(results, 4)
 
     best_result = max(results, key=lambda item: item.accuracy)
-    save_confusion_matrix(y_test, best_result.predictions, best_result.name, confusion_index)
-    save_wrong_samples(x_test, y_test, best_result.predictions, best_result.name, wrong_index)
+    save_confusion_matrix(y_test, best_result.predictions, best_result.name, 5)
+    save_wrong_samples(x_test, y_test, best_result.predictions, best_result.name, 6)
     save_model(best_result)
     save_text_reports(results, best_result, y_test)
 
