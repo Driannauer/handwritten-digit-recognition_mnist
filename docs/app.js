@@ -18,9 +18,10 @@ const sourceLabel = document.querySelector("#source-label");
 let model = null;
 let isDrawing = false;
 let lastPoint = null;
-let lastInput = null;
+let lastCandidate = null;
 
 const canvasSize = drawCanvas.width;
+const candidateRotations = [0, 90, 270, 180];
 
 function setStatus(message, tone = "neutral") {
   statusText.textContent = message;
@@ -36,7 +37,7 @@ function resetDrawingCanvas() {
   drawContext.shadowColor = "rgba(255,255,255,0.22)";
   drawContext.shadowBlur = 3;
   sourceLabel.textContent = "画板输入";
-  lastInput = null;
+  lastCandidate = null;
   renderPreview(new Float32Array(28 * 28));
 }
 
@@ -50,6 +51,7 @@ function getCanvasPoint(event) {
 }
 
 function drawLine(from, to) {
+  lastCandidate = null;
   drawContext.lineWidth = Number(brushSize.value);
   drawContext.beginPath();
   drawContext.moveTo(from.x, from.y);
@@ -139,31 +141,159 @@ function shiftInput(input, shiftX, shiftY) {
   return output;
 }
 
-function preprocessCanvas(sourceCanvas) {
-  const { ink, width, height, threshold } = sourceToInk(sourceCanvas);
+function rotateInk(ink, width, height, rotationDegrees) {
+  const normalizedRotation = ((rotationDegrees % 360) + 360) % 360;
+  if (normalizedRotation === 0) {
+    return { ink, width, height };
+  }
+
+  const targetWidth = normalizedRotation === 180 ? width : height;
+  const targetHeight = normalizedRotation === 180 ? height : width;
+  const output = new Float32Array(targetWidth * targetHeight);
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let targetX = x;
+      let targetY = y;
+      if (normalizedRotation === 90) {
+        targetX = height - 1 - y;
+        targetY = x;
+      } else if (normalizedRotation === 180) {
+        targetX = width - 1 - x;
+        targetY = height - 1 - y;
+      } else if (normalizedRotation === 270) {
+        targetX = y;
+        targetY = width - 1 - x;
+      }
+      output[targetY * targetWidth + targetX] = ink[y * width + x];
+    }
+  }
+
+  return { ink: output, width: targetWidth, height: targetHeight };
+}
+
+function emptyCandidate(rotationDegrees) {
+  return {
+    input: new Float32Array(28 * 28),
+    rotationDegrees,
+    orientationScore: 0,
+    qualityScore: 0,
+  };
+}
+
+function scoreProcessedDigitQuality(input) {
+  let minX = 28;
+  let minY = 28;
+  let maxX = -1;
+  let maxY = -1;
+  let pixelCount = 0;
+
+  for (let y = 0; y < 28; y += 1) {
+    for (let x = 0; x < 28; x += 1) {
+      if (input[y * 28 + x] > 0.05) {
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+        pixelCount += 1;
+      }
+    }
+  }
+
+  if (pixelCount < 8 || maxX < minX || maxY < minY) {
+    return 0;
+  }
+
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+  if (height < 4 || width < 2) {
+    return 0;
+  }
+
+  const bboxArea = Math.max(1, width * height);
+  const fillRatio = pixelCount / bboxArea;
+  const sizeScore = Math.min(1, Math.max(0.2, bboxArea / 160));
+  let fillScore = 1;
+  if (fillRatio < 0.10) {
+    fillScore = Math.max(0.25, fillRatio / 0.10);
+  } else if (fillRatio > 0.62) {
+    fillScore = Math.max(0.18, 1 - (fillRatio - 0.62) / 0.30);
+  }
+
+  const aspectRatio = Math.max(height, width) / Math.max(1, Math.min(height, width));
+  let aspectScore = 0.85 + 0.15 * Math.min(1, aspectRatio / 4);
+  if (height >= width * 1.8) {
+    aspectScore *= 1.08;
+  }
+
+  const margin = Math.min(minY, minX, 27 - maxY, 27 - maxX);
+  const borderScore = margin <= 0 ? 0.75 : 1;
+  return Math.max(0, Math.min(1, sizeScore * fillScore * aspectScore * borderScore));
+}
+
+function inputSum(input) {
+  let total = 0;
+  for (const value of input) {
+    total += value;
+  }
+  return total;
+}
+
+function candidateIsBlank(candidate) {
+  return candidate.qualityScore <= 0 || inputSum(candidate.input) < 0.5;
+}
+
+function preprocessInk(inkData, rotationDegrees = 0) {
+  const rotated = rotateInk(inkData.ink, inkData.width, inkData.height, rotationDegrees);
+  const { ink, width, height } = rotated;
+  const { threshold } = inkData;
+  const cleanInk = new Float32Array(ink.length);
   let minX = width;
   let minY = height;
   let maxX = -1;
   let maxY = -1;
+  let area = 0;
+  let inkStrength = 0;
 
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       const value = ink[y * width + x];
       if (value > threshold) {
+        cleanInk[y * width + x] = value;
         minX = Math.min(minX, x);
         minY = Math.min(minY, y);
         maxX = Math.max(maxX, x);
         maxY = Math.max(maxY, y);
+        area += 1;
+        inkStrength += value;
       }
     }
   }
 
   if (maxX < minX || maxY < minY) {
-    return new Float32Array(28 * 28);
+    return emptyCandidate(rotationDegrees);
   }
 
   const cropWidth = maxX - minX + 1;
   const cropHeight = maxY - minY + 1;
+  const fillRatio = area / Math.max(1, cropWidth * cropHeight);
+  let strokeDensityBonus = Math.min(1, fillRatio / 0.18);
+  if (fillRatio > 0.58) {
+    strokeDensityBonus *= Math.max(0.2, 1 - (fillRatio - 0.58) / 0.32);
+  }
+
+  const centerX = (minX + maxX + 1) / 2;
+  const centerY = (minY + maxY + 1) / 2;
+  const centerBonus = 1 / (
+    1 +
+    ((centerX - width / 2) / (width / 2)) ** 2 +
+    ((centerY - height / 2) / (height / 2)) ** 2
+  );
+  const heightWidthRatio = cropHeight / Math.max(1, cropWidth);
+  const shapeBonus = heightWidthRatio >= 1
+    ? Math.min(1.45, 0.70 + 0.18 * heightWidthRatio)
+    : Math.max(0.35, heightWidthRatio);
+  const orientationScore = inkStrength * strokeDensityBonus * centerBonus * shapeBonus;
   const scale = Math.min(20 / cropWidth, 20 / cropHeight);
   const targetWidth = Math.max(1, Math.round(cropWidth * scale));
   const targetHeight = Math.max(1, Math.round(cropHeight * scale));
@@ -176,7 +306,7 @@ function preprocessCanvas(sourceCanvas) {
     for (let tx = 0; tx < targetWidth; tx += 1) {
       const sourceX = minX + (tx + 0.5) / scale - 0.5;
       const sourceY = minY + (ty + 0.5) / scale - 0.5;
-      const value = bilinear(ink, width, height, sourceX, sourceY);
+      const value = bilinear(cleanInk, width, height, sourceX, sourceY);
       normalized[(top + ty) * 28 + left + tx] = value;
       maxValue = Math.max(maxValue, value);
     }
@@ -200,10 +330,84 @@ function preprocessCanvas(sourceCanvas) {
     }
   }
 
+  let input = normalized;
   if (mass > 0) {
-    return shiftInput(normalized, 13.5 - cx / mass, 13.5 - cy / mass);
+    input = shiftInput(normalized, 13.5 - cx / mass, 13.5 - cy / mass);
   }
-  return normalized;
+
+  return {
+    input,
+    rotationDegrees,
+    orientationScore,
+    qualityScore: scoreProcessedDigitQuality(input),
+  };
+}
+
+function preprocessCanvas(sourceCanvas) {
+  return preprocessInk(sourceToInk(sourceCanvas), 0).input;
+}
+
+function preprocessCanvasCandidates(sourceCanvas) {
+  const inkData = sourceToInk(sourceCanvas);
+  return candidateRotations.map((rotationDegrees) => preprocessInk(inkData, rotationDegrees));
+}
+
+function chooseCandidateForModel(modelInstance, candidates) {
+  const usableCandidates = candidates.filter((candidate) => !candidateIsBlank(candidate));
+  if (usableCandidates.length === 0) {
+    const fallback = candidates[0] ?? emptyCandidate(0);
+    return {
+      ...fallback,
+      probabilities: modelInstance.predict(fallback.input),
+    };
+  }
+
+  const maxOrientationScore = Math.max(...usableCandidates.map((candidate) => candidate.orientationScore));
+  const predictedCandidates = usableCandidates.map((candidate) => {
+    const probabilities = modelInstance.predict(candidate.input);
+    const top = getTopPrediction(probabilities);
+    return { ...candidate, probabilities, top };
+  });
+
+  if (maxOrientationScore <= 0) {
+    return predictedCandidates[0];
+  }
+
+  const originalCandidate = predictedCandidates.find((candidate) => candidate.rotationDegrees === 0) ?? predictedCandidates[0];
+  const originalConfidence = originalCandidate.top.confidence;
+  if (
+    originalConfidence >= 0.85 &&
+    originalCandidate.orientationScore >= 0.70 * maxOrientationScore &&
+    originalCandidate.qualityScore >= 0.45
+  ) {
+    return originalCandidate;
+  }
+
+  let bestCandidate = predictedCandidates[0];
+  let bestScore = -1;
+  let bestConfidence = 0;
+  for (const candidate of predictedCandidates) {
+    const orientationWeight = candidate.orientationScore / maxOrientationScore;
+    const combinedScore = candidate.top.confidence * (
+      0.35 + 0.30 * orientationWeight + 0.35 * candidate.qualityScore
+    );
+    if (combinedScore > bestScore) {
+      bestScore = combinedScore;
+      bestConfidence = candidate.top.confidence;
+      bestCandidate = candidate;
+    }
+  }
+
+  if (
+    bestCandidate.rotationDegrees === 180 &&
+    originalCandidate.orientationScore >= 0.95 * maxOrientationScore &&
+    originalConfidence >= 0.30 &&
+    bestConfidence <= 0.75
+  ) {
+    return originalCandidate;
+  }
+
+  return bestCandidate;
 }
 
 function renderPreview(input) {
@@ -247,16 +451,17 @@ function predictCurrent() {
     return;
   }
 
-  const input = lastInput ?? preprocessCanvas(drawCanvas);
-  lastInput = input;
-  renderPreview(input);
+  const candidate = lastCandidate ?? chooseCandidateForModel(model, preprocessCanvasCandidates(drawCanvas));
+  lastCandidate = candidate;
+  renderPreview(candidate.input);
 
-  const probabilities = model.predict(input);
+  const probabilities = candidate.probabilities ?? model.predict(candidate.input);
   const top = getTopPrediction(probabilities);
   resultDigit.textContent = String(top.digit);
   resultConfidence.textContent = `${(top.confidence * 100).toFixed(2)}%`;
   renderProbabilities(probabilities);
-  setStatus("浏览器端推理完成", "ready");
+  const rotationText = candidate.rotationDegrees === 0 ? "" : `，自动旋转 ${candidate.rotationDegrees} 度`;
+  setStatus(`浏览器端推理完成${rotationText}`, "ready");
 }
 
 async function loadImageToCanvas(source) {
@@ -276,8 +481,8 @@ async function loadImageToCanvas(source) {
   const top = (canvasSize - height) / 2;
   drawContext.drawImage(image, left, top, width, height);
   drawContext.shadowBlur = 3;
-  lastInput = preprocessCanvas(drawCanvas);
-  renderPreview(lastInput);
+  lastCandidate = null;
+  renderPreview(preprocessCanvas(drawCanvas));
 }
 
 async function handleUpload(event) {

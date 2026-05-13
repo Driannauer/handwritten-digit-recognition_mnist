@@ -9,6 +9,12 @@
 
 如果只是测试自己的手写图片，通常只需要运行 `test.py`，不需要重新训练。
 
+## 在线演示
+
+GitHub Pages: [https://driannauer.github.io/handwritten-digit-recognition_mnist/](https://driannauer.github.io/handwritten-digit-recognition_mnist/)
+
+静态前端位于 `docs/`，可以直接在浏览器里画数字、上传图片或点选样例。浏览器端会裁剪、缩放、居中输入，并自动比较 `0`、`90`、`270`、`180` 度候选方向后再显示预测结果。
+
 ## 文件结构
 
 ```text
@@ -17,6 +23,7 @@ test.py                  加载模型并预测本地图片
 environment.yml          Conda 环境配置
 requirements.txt         pip 依赖列表
 expected_labels.json     默认本地测试图片真实标签
+docs/                    GitHub Pages 静态前端和浏览器模型权重
 models/                  保存训练好的模型
 outputs/                 保存训练和预测输出
 t*.jpg                   本地手写数字测试图片
@@ -211,6 +218,8 @@ outputs/prediction_summary.json
 - 缩放到 `28x28`。
 - 根据重心居中。
 - 自动比较多个旋转方向。
+
+`docs/` 中的浏览器前端也会在识别时比较 `0`、`90`、`270`、`180` 度方向，并优先保留高置信、高质量的原方向候选。
 
 当前还有两个针对真实照片的增强：
 
