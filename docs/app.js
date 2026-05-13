@@ -22,6 +22,8 @@ let lastCandidate = null;
 
 const canvasSize = drawCanvas.width;
 const candidateRotations = [0, 90, 270, 180];
+const localPreprocessSigma = 18;
+const localPreprocessThreshold = 30;
 
 function setStatus(message, tone = "neutral") {
   statusText.textContent = message;
@@ -81,42 +83,32 @@ function stopDrawing() {
   lastPoint = null;
 }
 
-function sourceToInk(sourceCanvas) {
+function sourceToBrightness(sourceCanvas) {
   const context = sourceCanvas.getContext("2d", { willReadFrequently: true });
   const { width, height } = sourceCanvas;
   const imageData = context.getImageData(0, 0, width, height).data;
-  const gray = new Float32Array(width * height);
+  const bright = new Float32Array(width * height);
   const borderValues = [];
 
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       const offset = (y * width + x) * 4;
-      const value = (0.2126 * imageData[offset] + 0.7152 * imageData[offset + 1] + 0.0722 * imageData[offset + 2]) / 255;
-      gray[y * width + x] = value;
+      const value = Math.max(imageData[offset], imageData[offset + 1], imageData[offset + 2]);
+      bright[y * width + x] = value;
       if (x < 4 || y < 4 || x >= width - 4 || y >= height - 4) {
-        borderValues.push(value);
+        borderValues.push(value / 255);
       }
     }
   }
 
   borderValues.sort((a, b) => a - b);
   const borderMedian = borderValues[Math.floor(borderValues.length / 2)] ?? 0;
-  const darkInk = borderMedian > 0.55;
-  const ink = new Float32Array(width * height);
-  let sum = 0;
-  let sumSquares = 0;
-
-  for (let index = 0; index < gray.length; index += 1) {
-    const value = darkInk ? 1 - gray[index] : gray[index];
-    ink[index] = Math.max(0, Math.min(1, value));
-    sum += ink[index];
-    sumSquares += ink[index] * ink[index];
+  if (borderMedian < 0.45) {
+    for (let index = 0; index < bright.length; index += 1) {
+      bright[index] = 255 - bright[index];
+    }
   }
-
-  const mean = sum / ink.length;
-  const variance = Math.max(0, sumSquares / ink.length - mean * mean);
-  const threshold = Math.max(0.08, Math.min(0.55, mean + Math.sqrt(variance) * 0.55));
-  return { ink, width, height, threshold };
+  return { bright, width, height };
 }
 
 function bilinear(source, width, height, x, y) {
@@ -138,6 +130,84 @@ function shiftInput(input, shiftX, shiftY) {
       output[y * 28 + x] = bilinear(input, 28, 28, x - shiftX, y - shiftY);
     }
   }
+  return output;
+}
+
+function recenterInput(input) {
+  let mass = 0;
+  let cx = 0;
+  let cy = 0;
+  for (let y = 0; y < 28; y += 1) {
+    for (let x = 0; x < 28; x += 1) {
+      const value = input[y * 28 + x];
+      mass += value;
+      cx += x * value;
+      cy += y * value;
+    }
+  }
+
+  if (mass <= 0) {
+    return input;
+  }
+
+  const shifted = shiftInput(input, 13.5 - cx / mass, 13.5 - cy / mass);
+  for (let index = 0; index < shifted.length; index += 1) {
+    shifted[index] = Math.max(0, Math.min(1, shifted[index]));
+  }
+  return shifted;
+}
+
+function reflectIndex(index, length) {
+  if (length <= 1) {
+    return 0;
+  }
+  let reflected = index;
+  while (reflected < 0 || reflected >= length) {
+    reflected = reflected < 0 ? -reflected - 1 : 2 * length - reflected - 1;
+  }
+  return reflected;
+}
+
+function gaussianKernel(sigma) {
+  const radius = Math.ceil(sigma * 3);
+  const kernel = new Float32Array(radius * 2 + 1);
+  let total = 0;
+  for (let offset = -radius; offset <= radius; offset += 1) {
+    const value = Math.exp(-(offset * offset) / (2 * sigma * sigma));
+    kernel[offset + radius] = value;
+    total += value;
+  }
+  for (let index = 0; index < kernel.length; index += 1) {
+    kernel[index] /= total;
+  }
+  return { kernel, radius };
+}
+
+function gaussianBlur(source, width, height, sigma) {
+  const { kernel, radius } = gaussianKernel(sigma);
+  const temp = new Float32Array(source.length);
+  const output = new Float32Array(source.length);
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let value = 0;
+      for (let offset = -radius; offset <= radius; offset += 1) {
+        value += source[y * width + reflectIndex(x + offset, width)] * kernel[offset + radius];
+      }
+      temp[y * width + x] = value;
+    }
+  }
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let value = 0;
+      for (let offset = -radius; offset <= radius; offset += 1) {
+        value += temp[reflectIndex(y + offset, height) * width + x] * kernel[offset + radius];
+      }
+      output[y * width + x] = value;
+    }
+  }
+
   return output;
 }
 
@@ -243,113 +313,339 @@ function candidateIsBlank(candidate) {
   return candidate.qualityScore <= 0 || inputSum(candidate.input) < 0.5;
 }
 
-function preprocessInk(inkData, rotationDegrees = 0) {
-  const rotated = rotateInk(inkData.ink, inkData.width, inkData.height, rotationDegrees);
-  const { ink, width, height } = rotated;
-  const { threshold } = inkData;
-  const cleanInk = new Float32Array(ink.length);
-  let minX = width;
-  let minY = height;
-  let maxX = -1;
-  let maxY = -1;
-  let area = 0;
-  let inkStrength = 0;
+function findBestComponent(ink, width, height, threshold) {
+  const visited = new Uint8Array(ink.length);
+  const stack = new Int32Array(ink.length);
+  let bestComponent = null;
+  let bestScore = -1;
+
+  for (let start = 0; start < ink.length; start += 1) {
+    if (visited[start] || ink[start] <= threshold) {
+      continue;
+    }
+
+    let top = 0;
+    stack[top] = start;
+    top += 1;
+    visited[start] = 1;
+    let area = 0;
+    let inkStrength = 0;
+    let minX = width;
+    let minY = height;
+    let maxX = -1;
+    let maxY = -1;
+
+    while (top > 0) {
+      top -= 1;
+      const index = stack[top];
+      const x = index % width;
+      const y = (index - x) / width;
+      const value = ink[index];
+      area += 1;
+      inkStrength += value;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+
+      const neighbors = [
+        x > 0 ? index - 1 : -1,
+        x < width - 1 ? index + 1 : -1,
+        y > 0 ? index - width : -1,
+        y < height - 1 ? index + width : -1,
+      ];
+      for (const neighbor of neighbors) {
+        if (neighbor >= 0 && !visited[neighbor] && ink[neighbor] > threshold) {
+          visited[neighbor] = 1;
+          stack[top] = neighbor;
+          top += 1;
+        }
+      }
+    }
+
+    if (area < 30) {
+      continue;
+    }
+
+    const componentHeight = maxY - minY + 1;
+    const componentWidth = maxX - minX + 1;
+    const aspectRatio = Math.max(componentHeight, componentWidth) / Math.max(1, Math.min(componentHeight, componentWidth));
+    if (aspectRatio > 12) {
+      continue;
+    }
+    if ((minY <= 2 || minX <= 2 || maxY >= height - 3 || maxX >= width - 3) && aspectRatio > 4) {
+      continue;
+    }
+
+    const fillRatio = area / Math.max(1, componentHeight * componentWidth);
+    let strokeDensityBonus = Math.min(1, fillRatio / 0.18);
+    if (fillRatio > 0.58) {
+      strokeDensityBonus *= Math.max(0.2, 1 - (fillRatio - 0.58) / 0.32);
+    }
+
+    const centerX = (minX + maxX + 1) / 2;
+    const centerY = (minY + maxY + 1) / 2;
+    const centerBonus = 1 / (
+      1 +
+      ((centerX - width / 2) / (width / 2)) ** 2 +
+      ((centerY - height / 2) / (height / 2)) ** 2
+    );
+    const heightWidthRatio = componentHeight / Math.max(1, componentWidth);
+    const shapeBonus = heightWidthRatio >= 1
+      ? Math.min(1.45, 0.70 + 0.18 * heightWidthRatio)
+      : Math.max(0.35, heightWidthRatio);
+    const score = inkStrength * strokeDensityBonus * centerBonus * shapeBonus;
+    if (score > bestScore) {
+      bestScore = score;
+      bestComponent = { minX, minY, maxX, maxY, score };
+    }
+  }
+
+  return bestComponent;
+}
+
+function suppressGuideRows(crop, width, height) {
+  const rowMeans = new Float32Array(height);
+  const rowStds = new Float32Array(height);
+  let meanTotal = 0;
 
   for (let y = 0; y < height; y += 1) {
+    let rowTotal = 0;
     for (let x = 0; x < width; x += 1) {
-      const value = ink[y * width + x];
-      if (value > threshold) {
-        cleanInk[y * width + x] = value;
+      rowTotal += crop[y * width + x];
+    }
+    rowMeans[y] = rowTotal / width;
+    meanTotal += rowMeans[y];
+  }
+
+  const meanAverage = meanTotal / height;
+  let meanVariance = 0;
+  for (let y = 0; y < height; y += 1) {
+    meanVariance += (rowMeans[y] - meanAverage) ** 2;
+    let rowVariance = 0;
+    for (let x = 0; x < width; x += 1) {
+      rowVariance += (crop[y * width + x] - rowMeans[y]) ** 2;
+    }
+    rowStds[y] = Math.sqrt(rowVariance / width);
+  }
+
+  const meanStd = Math.sqrt(meanVariance / height);
+  for (let y = 0; y < height; y += 1) {
+    if (rowMeans[y] > meanAverage + 0.5 * meanStd && rowStds[y] < 25) {
+      for (let x = 0; x < width; x += 1) {
+        crop[y * width + x] *= 0.15;
+      }
+    }
+  }
+}
+
+function maxFilter3(source, width, height) {
+  const output = new Float32Array(source.length);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let value = 0;
+      for (let yy = Math.max(0, y - 1); yy <= Math.min(height - 1, y + 1); yy += 1) {
+        for (let xx = Math.max(0, x - 1); xx <= Math.min(width - 1, x + 1); xx += 1) {
+          value = Math.max(value, source[yy * width + xx]);
+        }
+      }
+      output[y * width + x] = value;
+    }
+  }
+  return output;
+}
+
+function resizeToInput(source, width, height) {
+  const output = new Float32Array(28 * 28);
+  for (let y = 0; y < 28; y += 1) {
+    for (let x = 0; x < 28; x += 1) {
+      const sourceX = (x + 0.5) * (width / 28) - 0.5;
+      const sourceY = (y + 0.5) * (height / 28) - 0.5;
+      output[y * 28 + x] = Math.max(0, Math.min(1, bilinear(source, width, height, sourceX, sourceY) / 255));
+    }
+  }
+  return output;
+}
+
+function digitShapeFeatures(input) {
+  let minX = 28;
+  let minY = 28;
+  let maxX = -1;
+  let maxY = -1;
+  let upperPixels = 0;
+  let lowerPixels = 0;
+  for (let y = 0; y < 28; y += 1) {
+    for (let x = 0; x < 28; x += 1) {
+      if (input[y * 28 + x] > 0.05) {
         minX = Math.min(minX, x);
         minY = Math.min(minY, y);
         maxX = Math.max(maxX, x);
         maxY = Math.max(maxY, y);
-        area += 1;
-        inkStrength += value;
+        if (y < 14) {
+          upperPixels += 1;
+        } else {
+          lowerPixels += 1;
+        }
       }
     }
   }
 
   if (maxX < minX || maxY < minY) {
-    return emptyCandidate(rotationDegrees);
+    return null;
   }
 
-  const cropWidth = maxX - minX + 1;
-  const cropHeight = maxY - minY + 1;
-  const fillRatio = area / Math.max(1, cropWidth * cropHeight);
-  let strokeDensityBonus = Math.min(1, fillRatio / 0.18);
-  if (fillRatio > 0.58) {
-    strokeDensityBonus *= Math.max(0.2, 1 - (fillRatio - 0.58) / 0.32);
-  }
-
-  const centerX = (minX + maxX + 1) / 2;
-  const centerY = (minY + maxY + 1) / 2;
-  const centerBonus = 1 / (
-    1 +
-    ((centerX - width / 2) / (width / 2)) ** 2 +
-    ((centerY - height / 2) / (height / 2)) ** 2
-  );
-  const heightWidthRatio = cropHeight / Math.max(1, cropWidth);
-  const shapeBonus = heightWidthRatio >= 1
-    ? Math.min(1.45, 0.70 + 0.18 * heightWidthRatio)
-    : Math.max(0.35, heightWidthRatio);
-  const orientationScore = inkStrength * strokeDensityBonus * centerBonus * shapeBonus;
-  const scale = Math.min(20 / cropWidth, 20 / cropHeight);
-  const targetWidth = Math.max(1, Math.round(cropWidth * scale));
-  const targetHeight = Math.max(1, Math.round(cropHeight * scale));
-  const left = Math.floor((28 - targetWidth) / 2);
-  const top = Math.floor((28 - targetHeight) / 2);
-  const normalized = new Float32Array(28 * 28);
-  let maxValue = 0;
-
-  for (let ty = 0; ty < targetHeight; ty += 1) {
-    for (let tx = 0; tx < targetWidth; tx += 1) {
-      const sourceX = minX + (tx + 0.5) / scale - 0.5;
-      const sourceY = minY + (ty + 0.5) / scale - 0.5;
-      const value = bilinear(cleanInk, width, height, sourceX, sourceY);
-      normalized[(top + ty) * 28 + left + tx] = value;
-      maxValue = Math.max(maxValue, value);
+  let topWidth = 0;
+  let bottomWidth = 0;
+  for (let x = 0; x < 28; x += 1) {
+    let topHasInk = false;
+    let bottomHasInk = false;
+    for (let y = minY; y < Math.min(28, minY + 5); y += 1) {
+      topHasInk = topHasInk || input[y * 28 + x] > 0.05;
     }
-  }
-
-  if (maxValue > 0) {
-    for (let index = 0; index < normalized.length; index += 1) {
-      normalized[index] = Math.min(1, normalized[index] / maxValue);
+    for (let y = Math.max(0, maxY - 4); y <= maxY; y += 1) {
+      bottomHasInk = bottomHasInk || input[y * 28 + x] > 0.05;
     }
-  }
-
-  let mass = 0;
-  let cx = 0;
-  let cy = 0;
-  for (let y = 0; y < 28; y += 1) {
-    for (let x = 0; x < 28; x += 1) {
-      const value = normalized[y * 28 + x];
-      mass += value;
-      cx += x * value;
-      cy += y * value;
+    if (topHasInk) {
+      topWidth += 1;
     }
-  }
-
-  let input = normalized;
-  if (mass > 0) {
-    input = shiftInput(normalized, 13.5 - cx / mass, 13.5 - cy / mass);
+    if (bottomHasInk) {
+      bottomWidth += 1;
+    }
   }
 
   return {
+    width: maxX - minX + 1,
+    height: maxY - minY + 1,
+    topRow: minY,
+    topWidth,
+    bottomWidth,
+    upperPixels,
+    lowerPixels,
+  };
+}
+
+function buildTopBarBoostCandidate(candidate) {
+  if (candidateIsBlank(candidate)) {
+    return null;
+  }
+  const features = digitShapeFeatures(candidate.input);
+  if (
+    !features ||
+    features.width < 8 ||
+    features.height < 18 ||
+    features.topWidth < Math.max(7, Math.ceil(features.width * 0.75)) ||
+    features.topWidth < features.bottomWidth + 5 ||
+    features.upperPixels < 0.8 * Math.max(1, features.lowerPixels)
+  ) {
+    return null;
+  }
+
+  const enhanced = Float32Array.from(candidate.input);
+  for (let y = features.topRow; y < Math.min(28, features.topRow + 4); y += 1) {
+    for (let x = 0; x < 28; x += 1) {
+      enhanced[y * 28 + x] = Math.min(1, enhanced[y * 28 + x] * 1.8);
+    }
+  }
+  const input = recenterInput(enhanced);
+  return {
+    ...candidate,
+    input,
+    qualityScore: scoreProcessedDigitQuality(input),
+    preprocessingAdjustment: "top_bar_boost",
+  };
+}
+
+function preprocessBrightness(brightData, rotationDegrees = 0) {
+  const rotated = rotateInk(brightData.bright, brightData.width, brightData.height, rotationDegrees);
+  const { ink: bright, width, height } = rotated;
+  const background = gaussianBlur(bright, width, height, localPreprocessSigma);
+  const ink = new Float32Array(bright.length);
+  let maxInk = 0;
+
+  for (let index = 0; index < bright.length; index += 1) {
+    const value = Math.max(0, background[index] - bright[index]);
+    ink[index] = value;
+    maxInk = Math.max(maxInk, value);
+  }
+
+  if (maxInk > 0) {
+    for (let index = 0; index < ink.length; index += 1) {
+      ink[index] = (ink[index] / maxInk) * 255;
+    }
+  }
+
+  const bestComponent = findBestComponent(ink, width, height, localPreprocessThreshold);
+  if (!bestComponent) {
+    return emptyCandidate(rotationDegrees);
+  }
+
+  let cropMinX = width;
+  let cropMinY = height;
+  let cropMaxX = -1;
+  let cropMaxY = -1;
+  for (let y = bestComponent.minY; y <= bestComponent.maxY; y += 1) {
+    for (let x = bestComponent.minX; x <= bestComponent.maxX; x += 1) {
+      if (ink[y * width + x] > localPreprocessThreshold) {
+        cropMinX = Math.min(cropMinX, x);
+        cropMinY = Math.min(cropMinY, y);
+        cropMaxX = Math.max(cropMaxX, x);
+        cropMaxY = Math.max(cropMaxY, y);
+      }
+    }
+  }
+
+  if (cropMaxX < cropMinX || cropMaxY < cropMinY) {
+    return emptyCandidate(rotationDegrees);
+  }
+
+  const cropWidth = cropMaxX - cropMinX + 1;
+  const cropHeight = cropMaxY - cropMinY + 1;
+  const crop = new Float32Array(cropWidth * cropHeight);
+  for (let y = 0; y < cropHeight; y += 1) {
+    for (let x = 0; x < cropWidth; x += 1) {
+      const value = ink[(cropMinY + y) * width + cropMinX + x];
+      crop[y * cropWidth + x] = value > localPreprocessThreshold ? value : 0;
+    }
+  }
+
+  suppressGuideRows(crop, cropWidth, cropHeight);
+
+  const side = Math.max(cropWidth, cropHeight) + 12;
+  const padded = new Float32Array(side * side);
+  const top = Math.floor((side - cropHeight) / 2);
+  const left = Math.floor((side - cropWidth) / 2);
+  for (let y = 0; y < cropHeight; y += 1) {
+    for (let x = 0; x < cropWidth; x += 1) {
+      padded[(top + y) * side + left + x] = crop[y * cropWidth + x];
+    }
+  }
+
+  const filtered = maxFilter3(padded, side, side);
+  const input = recenterInput(resizeToInput(filtered, side, side));
+  return {
     input,
     rotationDegrees,
-    orientationScore,
+    orientationScore: bestComponent.score,
     qualityScore: scoreProcessedDigitQuality(input),
   };
 }
 
-function preprocessCanvas(sourceCanvas) {
-  return preprocessInk(sourceToInk(sourceCanvas), 0).input;
+function preprocessCanvas(sourceCanvas, rotationDegrees = 0) {
+  return preprocessBrightness(sourceToBrightness(sourceCanvas), rotationDegrees).input;
 }
 
 function preprocessCanvasCandidates(sourceCanvas) {
-  const inkData = sourceToInk(sourceCanvas);
-  return candidateRotations.map((rotationDegrees) => preprocessInk(inkData, rotationDegrees));
+  const brightData = sourceToBrightness(sourceCanvas);
+  const candidates = [];
+  for (const rotationDegrees of candidateRotations) {
+    const candidate = preprocessBrightness(brightData, rotationDegrees);
+    candidates.push(candidate);
+    const boostedCandidate = buildTopBarBoostCandidate(candidate);
+    if (boostedCandidate) {
+      candidates.push(boostedCandidate);
+    }
+  }
+  return candidates;
 }
 
 function chooseCandidateForModel(modelInstance, candidates) {
@@ -380,7 +676,21 @@ function chooseCandidateForModel(modelInstance, candidates) {
     originalCandidate.orientationScore >= 0.70 * maxOrientationScore &&
     originalCandidate.qualityScore >= 0.45
   ) {
-    return originalCandidate;
+    let bestAdjustedCandidate = originalCandidate;
+    let bestAdjustedConfidence = originalConfidence;
+    for (const candidate of predictedCandidates) {
+      if (candidate.rotationDegrees !== originalCandidate.rotationDegrees || !candidate.preprocessingAdjustment) {
+        continue;
+      }
+      if (
+        candidate.qualityScore >= 0.80 * originalCandidate.qualityScore &&
+        candidate.top.confidence >= bestAdjustedConfidence + 0.08
+      ) {
+        bestAdjustedCandidate = candidate;
+        bestAdjustedConfidence = candidate.top.confidence;
+      }
+    }
+    return bestAdjustedCandidate;
   }
 
   let bestCandidate = predictedCandidates[0];
