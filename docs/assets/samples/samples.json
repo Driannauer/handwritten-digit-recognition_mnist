@@ -1,0 +1,74 @@
+{
+  "samples": [
+    {
+      "name": "t1",
+      "label": 6,
+      "predicted": 6,
+      "confidence": 0.9999511241912842,
+      "image": "assets/samples/t1.png"
+    },
+    {
+      "name": "t2",
+      "label": 1,
+      "predicted": 1,
+      "confidence": 0.999997615814209,
+      "image": "assets/samples/t2.png"
+    },
+    {
+      "name": "t3",
+      "label": 8,
+      "predicted": 8,
+      "confidence": 0.9994070529937744,
+      "image": "assets/samples/t3.png"
+    },
+    {
+      "name": "t4",
+      "label": 9,
+      "predicted": 9,
+      "confidence": 0.9994345307350159,
+      "image": "assets/samples/t4.png"
+    },
+    {
+      "name": "t5",
+      "label": 7,
+      "predicted": 7,
+      "confidence": 0.9805081486701965,
+      "image": "assets/samples/t5.png"
+    },
+    {
+      "name": "t6",
+      "label": 2,
+      "predicted": 2,
+      "confidence": 0.994408905506134,
+      "image": "assets/samples/t6.png"
+    },
+    {
+      "name": "t7",
+      "label": 0,
+      "predicted": 0,
+      "confidence": 0.999996542930603,
+      "image": "assets/samples/t7.png"
+    },
+    {
+      "name": "t8",
+      "label": 5,
+      "predicted": 5,
+      "confidence": 0.9993942975997925,
+      "image": "assets/samples/t8.png"
+    },
+    {
+      "name": "t9",
+      "label": 3,
+      "predicted": 3,
+      "confidence": 0.9990559220314026,
+      "image": "assets/samples/t9.png"
+    },
+    {
+      "name": "t10",
+      "label": 4,
+      "predicted": 4,
+      "confidence": 0.9989217519760132,
+      "image": "assets/samples/t10.png"
+    }
+  ]
+}

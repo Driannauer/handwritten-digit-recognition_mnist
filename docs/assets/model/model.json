@@ -1,0 +1,307 @@
+{
+  "format": "mnist-cnn-float32-v1",
+  "source": "models/best_digit_model.keras",
+  "inputShape": [
+    28,
+    28,
+    1
+  ],
+  "classes": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+  ],
+  "epsilon": 0.001,
+  "weights": {
+    "conv2d/kernel": {
+      "shape": [
+        3,
+        3,
+        1,
+        32
+      ],
+      "offset": 0,
+      "size": 288
+    },
+    "conv2d/bias": {
+      "shape": [
+        32
+      ],
+      "offset": 288,
+      "size": 32
+    },
+    "batch_normalization/gamma": {
+      "shape": [
+        32
+      ],
+      "offset": 320,
+      "size": 32
+    },
+    "batch_normalization/beta": {
+      "shape": [
+        32
+      ],
+      "offset": 352,
+      "size": 32
+    },
+    "batch_normalization/moving_mean": {
+      "shape": [
+        32
+      ],
+      "offset": 384,
+      "size": 32
+    },
+    "batch_normalization/moving_variance": {
+      "shape": [
+        32
+      ],
+      "offset": 416,
+      "size": 32
+    },
+    "conv2d_1/kernel": {
+      "shape": [
+        3,
+        3,
+        32,
+        32
+      ],
+      "offset": 448,
+      "size": 9216
+    },
+    "conv2d_1/bias": {
+      "shape": [
+        32
+      ],
+      "offset": 9664,
+      "size": 32
+    },
+    "batch_normalization_1/gamma": {
+      "shape": [
+        32
+      ],
+      "offset": 9696,
+      "size": 32
+    },
+    "batch_normalization_1/beta": {
+      "shape": [
+        32
+      ],
+      "offset": 9728,
+      "size": 32
+    },
+    "batch_normalization_1/moving_mean": {
+      "shape": [
+        32
+      ],
+      "offset": 9760,
+      "size": 32
+    },
+    "batch_normalization_1/moving_variance": {
+      "shape": [
+        32
+      ],
+      "offset": 9792,
+      "size": 32
+    },
+    "conv2d_2/kernel": {
+      "shape": [
+        3,
+        3,
+        32,
+        64
+      ],
+      "offset": 9824,
+      "size": 18432
+    },
+    "conv2d_2/bias": {
+      "shape": [
+        64
+      ],
+      "offset": 28256,
+      "size": 64
+    },
+    "batch_normalization_2/gamma": {
+      "shape": [
+        64
+      ],
+      "offset": 28320,
+      "size": 64
+    },
+    "batch_normalization_2/beta": {
+      "shape": [
+        64
+      ],
+      "offset": 28384,
+      "size": 64
+    },
+    "batch_normalization_2/moving_mean": {
+      "shape": [
+        64
+      ],
+      "offset": 28448,
+      "size": 64
+    },
+    "batch_normalization_2/moving_variance": {
+      "shape": [
+        64
+      ],
+      "offset": 28512,
+      "size": 64
+    },
+    "conv2d_3/kernel": {
+      "shape": [
+        3,
+        3,
+        64,
+        64
+      ],
+      "offset": 28576,
+      "size": 36864
+    },
+    "conv2d_3/bias": {
+      "shape": [
+        64
+      ],
+      "offset": 65440,
+      "size": 64
+    },
+    "batch_normalization_3/gamma": {
+      "shape": [
+        64
+      ],
+      "offset": 65504,
+      "size": 64
+    },
+    "batch_normalization_3/beta": {
+      "shape": [
+        64
+      ],
+      "offset": 65568,
+      "size": 64
+    },
+    "batch_normalization_3/moving_mean": {
+      "shape": [
+        64
+      ],
+      "offset": 65632,
+      "size": 64
+    },
+    "batch_normalization_3/moving_variance": {
+      "shape": [
+        64
+      ],
+      "offset": 65696,
+      "size": 64
+    },
+    "conv2d_4/kernel": {
+      "shape": [
+        3,
+        3,
+        64,
+        128
+      ],
+      "offset": 65760,
+      "size": 73728
+    },
+    "conv2d_4/bias": {
+      "shape": [
+        128
+      ],
+      "offset": 139488,
+      "size": 128
+    },
+    "batch_normalization_4/gamma": {
+      "shape": [
+        128
+      ],
+      "offset": 139616,
+      "size": 128
+    },
+    "batch_normalization_4/beta": {
+      "shape": [
+        128
+      ],
+      "offset": 139744,
+      "size": 128
+    },
+    "batch_normalization_4/moving_mean": {
+      "shape": [
+        128
+      ],
+      "offset": 139872,
+      "size": 128
+    },
+    "batch_normalization_4/moving_variance": {
+      "shape": [
+        128
+      ],
+      "offset": 140000,
+      "size": 128
+    },
+    "dense/kernel": {
+      "shape": [
+        6272,
+        128
+      ],
+      "offset": 140128,
+      "size": 802816
+    },
+    "dense/bias": {
+      "shape": [
+        128
+      ],
+      "offset": 942944,
+      "size": 128
+    },
+    "batch_normalization_5/gamma": {
+      "shape": [
+        128
+      ],
+      "offset": 943072,
+      "size": 128
+    },
+    "batch_normalization_5/beta": {
+      "shape": [
+        128
+      ],
+      "offset": 943200,
+      "size": 128
+    },
+    "batch_normalization_5/moving_mean": {
+      "shape": [
+        128
+      ],
+      "offset": 943328,
+      "size": 128
+    },
+    "batch_normalization_5/moving_variance": {
+      "shape": [
+        128
+      ],
+      "offset": 943456,
+      "size": 128
+    },
+    "dense_1/kernel": {
+      "shape": [
+        128,
+        10
+      ],
+      "offset": 943584,
+      "size": 1280
+    },
+    "dense_1/bias": {
+      "shape": [
+        10
+      ],
+      "offset": 944864,
+      "size": 10
+    }
+  }
+}

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>手写数字识别</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">MNIST CNN</p>
+          <h1>手写数字识别</h1>
+        </div>
+        <div id="model-status" class="status" data-tone="neutral">正在加载模型权重</div>
+      </header>
+
+      <section class="workspace" aria-label="手写数字识别工作区">
+        <div class="draw-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Input</p>
+              <h2 id="source-label">画板输入</h2>
+            </div>
+            <label class="upload-control">
+              <input id="upload-input" type="file" accept="image/*">
+              上传图片
+            </label>
+          </div>
+
+          <canvas id="draw-canvas" width="280" height="280" aria-label="手写数字画板"></canvas>
+
+          <div class="controls">
+            <button id="predict-button" class="button button-primary" type="button">识别</button>
+            <button id="clear-button" class="button" type="button">清空</button>
+            <label class="range-control">
+              <span>笔刷</span>
+              <input id="brush-size" type="range" min="10" max="34" value="22">
+            </label>
+          </div>
+        </div>
+
+        <aside class="result-panel" aria-label="识别结果">
+          <div class="result-main">
+            <div>
+              <p class="eyebrow">Prediction</p>
+              <div id="result-digit" class="result-digit">-</div>
+            </div>
+            <div class="confidence">
+              <span>置信度</span>
+              <strong id="result-confidence">0.00%</strong>
+            </div>
+          </div>
+
+          <div class="preview-row">
+            <canvas id="preview-canvas" width="112" height="112" aria-label="28x28 预处理预览"></canvas>
+            <div>
+              <p class="eyebrow">28 x 28</p>
+              <p class="small-copy">输入会在浏览器中裁剪、缩放、居中，然后直接送入本仓库训练出的 CNN 权重。</p>
+            </div>
+          </div>
+
+          <div id="probabilities" class="probabilities" aria-label="各数字概率"></div>
+        </aside>
+      </section>
+
+      <section class="sample-section" aria-label="样例数字">
+        <div class="section-heading">
+          <p class="eyebrow">Samples</p>
+          <h2>本地测试样例</h2>
+        </div>
+        <div id="sample-grid" class="sample-grid"></div>
+      </section>
+    </main>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
