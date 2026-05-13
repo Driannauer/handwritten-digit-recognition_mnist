@@ -13,7 +13,7 @@
 
 GitHub Pages: [https://driannauer.github.io/handwritten-digit-recognition_mnist/](https://driannauer.github.io/handwritten-digit-recognition_mnist/)
 
-静态前端位于 `docs/`，可以直接在浏览器里画数字、上传图片或点选样例。浏览器端会尽量模仿 `test.py` 的照片预处理流程：高斯背景估计、提取笔迹、选择主要连通域、裁剪、增强、缩放居中，并自动比较 `0`、`90`、`270`、`180` 度候选方向后再显示预测结果。
+静态前端位于 `docs/`，可以直接在浏览器里画数字、上传图片或点选样例。浏览器端会按当前输入方向裁剪、缩放、居中，然后直接送入本仓库训练出的 CNN 权重；不会自动尝试旋转方向。
 
 ## 文件结构
 
@@ -219,7 +219,7 @@ outputs/prediction_summary.json
 - 根据重心居中。
 - 自动比较多个旋转方向。
 
-`docs/` 中的浏览器前端也会尽量模仿 `test.py` 的预处理流程，并在识别时比较 `0`、`90`、`270`、`180` 度方向。
+`docs/` 中的浏览器前端只按当前输入方向做裁剪、缩放和居中，不会自动比较旋转方向。
 
 当前还有两个针对真实照片的增强：
 
